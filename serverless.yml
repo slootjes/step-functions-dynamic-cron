@@ -1,0 +1,119 @@
+service: dynamic-cron
+
+frameworkVersion: '2'
+
+variablesResolutionMode: 20210326
+
+plugins:
+  - serverless-step-functions
+  - serverless-prune-plugin
+  - serverless-cloudformation-sub-variables
+
+provider:
+  name: aws
+  runtime: nodejs14.x
+  lambdaHashingVersion: 20201221
+  stage: ${opt:stage, 'dev'}
+  region: ${opt:region, 'eu-west-1'}
+  iam:
+    role:
+      statements:
+        - Effect: Allow
+          Action:
+            - states:ListExecutions
+            - states:StartExecution
+          Resource: ${self:custom.stateMachineArn}
+        - Effect: Allow
+          Action:
+            - states:StopExecution
+          Resource: arn:#{AWS::Partition}:states:#{AWS::Region}:#{AWS::AccountId}:execution:${self:custom.stateMachineName}:*
+  environment:
+    STATE_MACHINE_ARN: ${self:custom.stateMachineArn}
+
+custom:
+  stateMachineName: ${self:service}-${self:provider.stage}-dynamicCron
+  stateMachineArn: 'arn:#{AWS::Partition}:states:#{AWS::Region}:#{AWS::AccountId}:stateMachine:${self:custom.stateMachineName}'
+  prune:
+    automatic: true
+    number: 5
+
+functions:
+  task:
+    handler: task.handle
+  start:
+    handler: cron.start
+  stop:
+    handler: cron.stop
+  calculateIterations:
+    handler: cron.calculateIterations
+  restart:
+    handler: cron.restart
+
+stepFunctions:
+  stateMachines:
+    dynamicCron:
+      id: DynamicCron
+      name: ${self:custom.stateMachineName}
+      definition:
+        StartAt: Stop
+        States:
+          Stop:
+            Comment: Stop current execution
+            Type: Task
+            Resource:
+              Fn::GetAtt: [ stop, Arn ]
+            Parameters:
+              'executionId.$': $$.Execution.Id
+              'task.$': $.task
+              'rate.$': $.rate
+            Retry:
+              - ErrorEquals: [ States.ALL ]
+                IntervalSeconds: 5
+                MaxAttempts: 10
+            Next: CalculateIterations
+          CalculateIterations:
+            Comment: Set amount of task iterations
+            Type: Task
+            Resource:
+              Fn::GetAtt: [ calculateIterations, Arn ]
+            ResultPath: $.iterations
+            Next: TaskIterator
+          TaskIterator:
+            Type: Map
+            ItemsPath: $.iterations
+            MaxConcurrency: 1
+            ResultPath: $.iterationResults
+            Parameters:
+              'task.$': $.task
+              'rate.$': $.rate
+            Iterator:
+              StartAt: Task
+              States:
+                Task:
+                  Comment: Run the actual function
+                  Type: Task
+                  Resource: arn:aws:states:::lambda:invoke
+                  Parameters:
+                    FunctionName.$: $.task
+                  ResultPath: $.result
+                  Retry:
+                    - ErrorEquals: [ States.ALL ]
+                  Next: Wait
+                Wait:
+                  Comment: Wait the configured amount of seconds
+                  Type: Wait
+                  SecondsPath: $.rate
+                  End: True
+            Next: Restart
+          Restart:
+            Type: Task
+            Resource:
+              Fn::GetAtt: [ restart, Arn ]
+            Retry:
+              - ErrorEquals: [ States.ALL ]
+                IntervalSeconds: 5
+                MaxAttempts: 10
+            Next: End
+          End:
+            Type: Pass
+            End: true

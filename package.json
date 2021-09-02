@@ -1,0 +1,9 @@
+{
+  "devDependencies": {
+    "serverless-prune-plugin": "^1.5.1",
+    "serverless-step-functions": "^3.0.0"
+  },
+  "dependencies": {
+    "serverless-cloudformation-sub-variables": "^0.2.1"
+  }
+}
