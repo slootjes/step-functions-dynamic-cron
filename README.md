@@ -2,6 +2,8 @@
 
 Example Serverless Framework project to run cron tasks as low as once per second using AWS Step Functions with the ability to change the rate on the fly. 
 
+For more information please read this [related article](https://medium.com/@slootjes/dynamic-rate-cron-using-step-functions-91ad1afc8d43).
+
 ## Prerequisites
 - Serverless Framework
 - Configured AWS profile
